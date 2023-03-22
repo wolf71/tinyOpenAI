@@ -2,7 +2,7 @@
   # Tiny OpenAI ChatGPT and Whisper API Library
   - 2023/3     V0.1       By Charles Lai
 '''
-__version__ = 0.1
+__version__ = 0.12
 __author__ = 'Charles Lai'
 
 import requests
@@ -148,6 +148,37 @@ class Whisper():
       rdata = ''
     # Return result
     return rdata
+
+#
+# OpenAI embeddings
+#
+class Embedding():
+  def __init__(self, API_Key='', Proxy='', Model='text-embedding-ada-002', URL='https://api.openai.com/v1/embeddings', Debug=False):
+    ''' OpenAI embeddings API, args: API_Key, Proxy, Model, API_URL, Debug '''
+    self.API_Key = API_Key
+    self.URL = URL
+    self.Proxy = Proxy
+    self.Model = Model
+    self.Debug = Debug      # Debug info print
+    self.Call_cnt = 0       # Total Call count
+    self.Total_tokens = 0   # Total tokens count
+
+  def embed(self, data):
+    ''' embedding data , data can be string or python list
+      How to using return value?
+      1. ret[0]['embedding'] 
+      2. for v in ret:
+          v.get('embedding')
+    '''
+    headers = { "Content-Type": "application/json", "Authorization": f"Bearer {self.API_Key}" }
+    # Call API
+    rdata = httpPost(self.Debug, self.URL, headers = headers, proxies={"http": self.Proxy, "https": self.Proxy}, json = {"model": self.Model, "input": data})
+    # add total_tokens, call times
+    if rdata:
+      self.Total_tokens += rdata.get('usage', {}).get('total_tokens', 0)
+      self.Call_cnt += 1
+    # return result
+    return rdata.get('data', [])
 
 #
 # ChatGPT Query Demo

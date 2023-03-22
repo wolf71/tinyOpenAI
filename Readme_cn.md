@@ -1,10 +1,11 @@
 # Tiny OpenAI ChatGPT and Whisper API Library
-- 2023/3     V0.1       By Charles Lai
+- 2023/3     V0.12       By Charles Lai
 
 ## 功能
 - 纯 Python 编写的 OpenAI ChatGPT and Whisper API 库, 因此可以在 M1/M2 Mac, iPad/iPhone 等设备上的 Python 环境运行(例如: Pythonista, Juno, CODE, Pyto 等)
 - 支持符合 ChatGPT API JSON 格式的接口调用的方法. 并提供一个易用的 query 快速对话方法,支持上下文关联 和 一个快速简单的语言翻译方法
 - 支持 Whisper 接口调用, 将上传的 音频文件 识别解析为文本信息或翻译成英语
+- 支持 Embedding 接口调用, 对传入的文本进行 Embedding 向量化, 支持字符串或文本数组
 
 ## 使用
 ### ChatGPT
@@ -82,4 +83,33 @@ w = tinyOpenAI.Whisper('your OpenAI API_Key', Debug=True)
 print(w.call('test1.m4a'))   # or mp3/mp4 file
 print(w.call('test2.m4a'))   # or mp3/mp4 file
 print('Call cnt: %d, Total Texts: %d' % (w.Call_cnt, w.Total_tokens) )
+```
+
+### Embedding (获取文本的嵌入向量)
+- __init__(self, API_Key='', Proxy='', Model='text-embedding-ada-002', URL='https://api.openai.com/v1/embeddings', Debug=False)
+  - 初始化创建 Embedding 对象, 对应参数如下
+  - API_Key: 你的 openAI API Key
+  - Proxy: 如需要，设置你的 http代理服务器，例如: http://192.168.3.1:3128
+  - Model: 如需要，可以根据 OpenAI API文档进行设置
+  - URL: 若 OpenAI 更改了 API 调用地址，可以在这里更改, 注意这里是一个包含两个地址的列表, 第一个地址是原语言输出, 第二个地址是翻译成英文后输出
+  - Debug: 出现网络错误、调用错误，是否打印输出错误信息, 默认不输出
+- embed(data)
+  - data: 需要编码的 字符串 或 字符串列表
+  - 返回的结果是一个列表, 对应字符串的 embed 向量(1536维), 可以通过
+    - 对于输入字符串，可以用 ret[0].get('embedding') 获取向量
+    - 对于输入字符串列表, 可以用 [i.get('embedding') for i in ret] 来获取向量列表
+- 统计数据
+  - Call_cnt: 累计调用 Whisper 次数
+  - Total_tokens: 累计转录文字数量 (注意: OpenAI是按照音频时长计费, 而非文字数量计费)
+- 简单例子  
+``` python
+import tinyOpenAI
+
+e = tinyOpenAI.Embedding('your OpenAI API_Key', Debug=True)
+r = e.embed('just for fun')
+print('向量维度:',len(r[0].get('embedding')))
+# 比较两个文本的相似性
+r = e.embed(['just for fun','hello world.中文'])
+import numpy as np
+print('相似性结果:',np.dot(r[0].get('embedding'), r[1].get('embedding')))
 ```

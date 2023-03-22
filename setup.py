@@ -5,7 +5,7 @@ with open('Readme.md', 'r') as f:
 
 setuptools.setup(
     name = 'tinyOpenAI',
-    version = '0.1',
+    version = '0.12',
     author = 'Charles Lai',
     author_email = '',
     description = 'Tiny OpenAI ChatGPT and Whisper API Library',
