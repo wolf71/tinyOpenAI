@@ -1,12 +1,21 @@
 '''
   # Tiny OpenAI ChatGPT and Whisper API Library
   - 2023/3     V0.1       By Charles Lai
+  - 2023/4     V0.13
 '''
-__version__ = 0.12
+__version__ = 0.13
 __author__ = 'Charles Lai'
 
-import requests
+import requests, json
 
+def get_delta(rdata):
+  ''' Return stream mode delta text '''
+  # len() > 13 by pass  b'' and b'data: [DONE]'
+  if len(rdata) > 13:
+    return json.loads(rdata.decode('utf-8')[5:]).get('choices', [{}])[0].get('delta', {}).get('content','')
+  else:
+    return ''
+    
 #
 # HTTP_Post Function
 #
@@ -15,6 +24,10 @@ def httpPost(debug, *args, **kw):
     debug: True/False - Display Debug info;
     *args/**kw: requests.post args;
   '''
+  # get stream mode 
+  stream_mode = kw.get('json', {}).get('stream', False) == True
+  kw['stream'] = stream_mode
+
   # init return value
   rdata = {}
   try:
@@ -30,7 +43,11 @@ def httpPost(debug, *args, **kw):
   # Get Result
   if r.status_code == 200:
     try:
-      rdata = r.json()
+      if stream_mode:
+        # return a iter
+        rdata = ( get_delta(i) for i in r.iter_lines() )
+      else:
+        rdata = r.json()
     except:
       pass
   # status code not 200, print error info
@@ -44,20 +61,21 @@ def httpPost(debug, *args, **kw):
       print('@ Error, Please Check API_URL !')
     else:
       print('@ Error, HTTP Status_code is: %d !' % r.status_code)
-  # Return Result JSON
-  return rdata
+  # Return Result, stream_mode
+  return rdata, stream_mode
 
 #
 # ChatGPT API
 #
 class ChatGPT():
-  def __init__(self, API_Key='', Proxy='', Model='gpt-3.5-turbo', URL='https://api.openai.com/v1/chat/completions', Debug=False):
-    ''' ChatGPT API Access, args: API_Key, Proxy, Model, API_URL, Debug '''
+  def __init__(self, API_Key='', Proxy='', Model='gpt-3.5-turbo', URL='https://api.openai.com/v1/chat/completions', Debug=False, stream=False):
+    ''' ChatGPT API Access, args: API_Key, Proxy, Model, API_URL, Debug, stream '''
     self.API_Key = API_Key
     self.URL = URL
     self.Proxy = Proxy
     self.Model = Model
     self.Debug = Debug      # Debug info print
+    self.stream = stream    # openAI stream mode    
     self.Call_cnt = 0       # Total Call count
     self.Total_tokens = 0   # Total tokens count
     self.Hinfo = []         # Query History List
@@ -66,13 +84,13 @@ class ChatGPT():
     ''' Call ChatGPT '''
     headers = { "Content-Type": "application/json", "Authorization": f"Bearer {self.API_Key}" }
     # Call API
-    rdata = httpPost(self.Debug, self.URL, headers = headers, proxies={"http": self.Proxy, "https": self.Proxy}, json = {"model": self.Model, "messages": data})
+    rdata, stream_mode = httpPost(self.Debug, self.URL, headers = headers, proxies={"http": self.Proxy, "https": self.Proxy}, json = {"model": self.Model, "messages": data, "stream": self.stream})
     # add total_tokens, call times
-    if rdata:
+    self.Call_cnt += 1        
+    if not stream_mode and rdata:
       self.Total_tokens += rdata.get('usage', {}).get('total_tokens', 0)
-      self.Call_cnt += 1
     # return result
-    return rdata
+    return rdata, stream_mode
   
   def get_text(self, rdata):
     ''' Return only message text, rdata = chatGPT return json '''
@@ -90,19 +108,33 @@ class ChatGPT():
     '''
     if flag:
       # Using Query History [abs to avoid negative numbers, *2 for Q&A paired]
-      ret = self.get_text( self.call([{"role": "system", "content": system}] + self.Hinfo[-abs(hcnt*2):] + [{"role": "user", "content": data}]) )
-      # add Query + Answer to History list
-      self.Hinfo.append({"role": "user", "content": data})
-      self.Hinfo.append({"role": "assistant", "content": ret})
+      qdata = [{"role": "system", "content": system}] + self.Hinfo[-abs(hcnt*2):] + [{"role": "user", "content": data}]
     else:
-      ret = self.get_text( self.call([{"role": "system", "content": system}, {"role": "user","content": data}]) )
+      qdata = [{"role": "system", "content": system}, {"role": "user","content": data}]
+    # query openAI
+    r, stream_mode = self.call(qdata)
+    if not stream_mode:
+      ret = self.get_text(r)
+    else:
+      # stream mode, print out and then return result
+      ret = []
+      for t in r:
+        print(t, end='', flush=True)
+        ret.append(t)
+        # calc tokens (data is not available and only be estimated)
+        self.Total_tokens += 1
+      print()
+      ret = ''.join(ret)
+    # add Query + Answer to History list
+    self.Hinfo.append({"role": "user", "content": data})
+    self.Hinfo.append({"role": "assistant", "content": ret})
     return ret
 
   def translate(self, text, lang='simplified chinese'):
     ''' Translate text to Simple Chinese or other '''
     text = text.strip()
     if text:
-      return self.get_text( self.call([{"role": "user", "content": f"Please help me to translate,`{text}` to {lang}, please return only translated content not include the origin text"}]) )
+      return self.query( f"Please help me to translate,`{text}` to {lang}, please return only translated content not include the origin text", False, 0, '')
     else:
       return ''
 
@@ -134,7 +166,7 @@ class Whisper():
     if Type > len(self.URL): Type = len(self.URL) - 1
     # # Call ChatGPT API
     try:
-      rdata = httpPost(self.Debug, self.URL[Type], headers = { "Authorization": f"Bearer {self.API_Key}" }, proxies = {"http": self.Proxy, "https": self.Proxy}, data = {'model': self.Model}, files = {'file': (file, open(file,'rb'))} )
+      rdata, _ = httpPost(self.Debug, self.URL[Type], headers = { "Authorization": f"Bearer {self.API_Key}" }, proxies = {"http": self.Proxy, "https": self.Proxy}, data = {'model': self.Model}, files = {'file': (file, open(file,'rb'))} )
     except FileNotFoundError:
       print('@ Error, File Not Found!')
       rdata = ''
@@ -172,7 +204,7 @@ class Embedding():
     '''
     headers = { "Content-Type": "application/json", "Authorization": f"Bearer {self.API_Key}" }
     # Call API
-    rdata = httpPost(self.Debug, self.URL, headers = headers, proxies={"http": self.Proxy, "https": self.Proxy}, json = {"model": self.Model, "input": data})
+    rdata, _ = httpPost(self.Debug, self.URL, headers = headers, proxies={"http": self.Proxy, "https": self.Proxy}, json = {"model": self.Model, "input": data})
     # add total_tokens, call times
     if rdata:
       self.Total_tokens += rdata.get('usage', {}).get('total_tokens', 0)
@@ -193,16 +225,19 @@ def QueryDemo():
       Proxy = sys.argv[2]
     else:
       Proxy = ''
-    r = ChatGPT(API_Key, Proxy, Debug=True)
+    r = ChatGPT(API_Key, Proxy, Debug=True, stream=True)
     print('>>> ChatGPT Query <<<')
     while True:
       try:
         cmd = input('> ').strip()
-        if cmd:
+        if cmd == '?':
+          print(f'Call Time: {r.Call_cnt}, Total Tokens: {r.Total_tokens}.')
+        elif cmd:
           print('= '*36)
-          print( r.query(cmd, True, 6) )
+          r.query(cmd, True, 6)
           print()
       except KeyboardInterrupt:
+        print()
         break
   else:
     print('> Using python tinyOpenAI.py your_OpenAI_Key Proxy')
